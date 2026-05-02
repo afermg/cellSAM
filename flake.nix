@@ -1,4 +1,6 @@
 {
+  description = "Nahual server for CellSAM (ONNX edition; no DEEPCELL_ACCESS_TOKEN required).";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     systems.url = "github:nix-systems/default";
@@ -29,37 +31,28 @@
         nahualPkg = pkgs.python3.pkgs.callPackage ./nix/nahual.nix {
           pynng = inputs.pynng-flake.packages.${system}.pynng;
         };
-        modelPkgs = pkgs.callPackage ./nix { };
+
+        baseDeps = pp: [
+          nahualPkg
+          pp.onnxruntime
+          pp.numpy
+          pp.opencv-python
+          pp.scipy
+          pp.huggingface-hub
+          pp.loguru
+        ];
       in
       with pkgs;
       rec {
         formatter = pkgs.alejandra;
 
-        packages = modelPkgs // {
+        packages = {
           nahual = nahualPkg;
         };
 
         apps.default =
           let
-            python_with_pkgs = python3.withPackages (pp: [
-              nahualPkg
-              modelPkgs.cellsam
-              pp.torch
-              pp.torchvision
-              pp.numpy
-              pp.scikit-image
-              pp.scikit-learn
-              pp.scipy
-              pp.pyyaml
-              pp.tqdm
-              pp.requests
-              pp.kornia
-              pp.dask
-              pp.distributed
-              pp.dask-image
-              pp.pyarrow
-              pp.loguru
-            ]);
+            python_with_pkgs = python3.withPackages baseDeps;
             runServer = pkgs.writeScriptBin "runserver.sh" ''
               #!${pkgs.bash}/bin/bash
               export CUDA_PATH=${pkgs.cudaPackages.cudatoolkit}
@@ -75,27 +68,15 @@
         devShells = {
           default =
             let
-              python_with_pkgs = python3.withPackages (pp: [
-                nahualPkg
-                modelPkgs.cellsam
-                pp.torch
-                pp.torchvision
-                pp.numpy
-                pp.scikit-image
-                pp.scikit-learn
-                pp.scipy
-                pp.pyyaml
-                pp.tqdm
-                pp.requests
-                pp.kornia
-                pp.dask
-                pp.distributed
-                pp.dask-image
-                pp.pyarrow
-                pp.loguru
-                # Dev extras
-                pp.tifffile
-              ]);
+              python_with_pkgs = python3.withPackages (
+                pp:
+                baseDeps pp
+                ++ [
+                  pp.tifffile
+                  pp.scikit-image
+                  pp.pyyaml
+                ]
+              );
             in
             mkShell {
               packages = [

@@ -1,14 +1,11 @@
-"""Standalone smoke test for CellSAM.
+"""Standalone smoke test for CellSAM (ONNX edition).
 
-Loads the model the same way ``server.py`` does and runs a forward pass on a
+Loads the three ONNX sessions the same way ``server.py`` does, downloads
+weights from HuggingFace if needed (no auth), and runs a forward pass on a
 small synthetic input. Does NOT spin up the IPC server.
 
 Run from the repo root:
     nix develop --impure --command python basic_test.py
-
-Note: requires ``DEEPCELL_ACCESS_TOKEN`` in the environment. The model
-weights are fetched from ``users.deepcell.org`` on first use and cached in
-``~/.deepcell/models/``.
 """
 
 import sys
@@ -26,15 +23,16 @@ from server import setup  # noqa: E402
 def main() -> None:
     processor, info = setup()
     print(f"setup: {info}")
-    assert "cuda" in info["device"], (
-        f"Not on GPU! info['device']={info['device']!r}"
-    )
+    assert "device" in info, f"missing device in info: {info}"
 
-    # 5-D NCZYX with a single 256x256 RGB image.
     numpy.random.seed(0)
-    data = numpy.random.random_sample((1, 3, 1, 256, 256)).astype(numpy.float32)
+    # 5-D NCZYX with a single 256x256 1-channel image; replicated to 3 chans
+    # internally by _to_chw_3.
+    data = numpy.random.random_sample((1, 1, 1, 256, 256)).astype(numpy.float32)
     out = processor(data)
-    print(f"process: {type(out).__name__} shape={out.shape} dtype={out.dtype}")
+    print(f"process: {type(out).__name__} shape={out.shape} dtype={out.dtype} max_label={out.max()}")
+    assert out.shape == (1, 256, 256), f"unexpected shape {out.shape}"
+    assert out.dtype == numpy.int32, f"unexpected dtype {out.dtype}"
 
 
 if __name__ == "__main__":

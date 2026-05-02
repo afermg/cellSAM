@@ -3,11 +3,9 @@
   pkgs,
   python3Packages,
 }:
-let
-  callPackage = lib.callPackageWith (pkgs // packages // python3Packages);
-  packages = {
-    segment-anything = callPackage ./segment_anything.nix { };
-    cellsam = callPackage ./cellsam.nix { };
-  };
-in
-packages
+# No third-party python packages need building from source any more — the
+# ONNX edition uses only nixpkgs-provided libraries (onnxruntime, opencv,
+# huggingface-hub, scipy, numpy). Kept as a stub so the existing
+# `pkgs.callPackage ./nix { }` import sites elsewhere don't break.
+{
+}
