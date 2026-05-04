@@ -60,6 +60,10 @@
               #!${pkgs.bash}/bin/bash
               export CUDA_PATH=${pkgs.cudaPackages.cudatoolkit}
               export LD_LIBRARY_PATH=${pkgs.cudaPackages.cudatoolkit}/lib:${pkgs.cudaPackages.cudnn}/lib:$LD_LIBRARY_PATH
+              # PYTHONSAFEPATH=1 (Python 3.11+) keeps Python from prepending
+              # the script's directory to sys.path so the in-tree `cellSAM/`
+              # source tree never shadows the nix-built package.
+              export PYTHONSAFEPATH=1
               ${python_with_pkgs}/bin/python ${self}/server.py ''${@:-"ipc:///tmp/cellsam.ipc"}
             '';
           in
@@ -102,7 +106,11 @@
               shellHook = ''
                 export CUDA_PATH=${pkgs.cudaPackages.cudatoolkit}
                 export LD_LIBRARY_PATH=${pkgs.cudaPackages.cudatoolkit}/lib:${pkgs.cudaPackages.cudnn}/lib:$LD_LIBRARY_PATH
-                export PYTHONPATH=${python_with_pkgs}/${python_with_pkgs.sitePackages}
+                # PYTHONSAFEPATH=1 (Python 3.11+) keeps Python from prepending
+                # the script's directory to sys.path so `python basic_test.py`
+                # never picks up the in-tree `cellSAM/` source tree instead of
+                # the nix-built package.
+                export PYTHONSAFEPATH=1
                 export PYTHONDONTWRITEBYTECODE=1
               '';
             };
