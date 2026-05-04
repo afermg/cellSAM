@@ -4,8 +4,8 @@
     systems.url = "github:nix-systems/default";
     flake-utils.url = "github:numtide/flake-utils";
     flake-utils.inputs.systems.follows = "systems";
-    pynng-flake.url = "github:afermg/pynng";
-    pynng-flake.inputs.nixpkgs.follows = "nixpkgs";
+    nahual-flake.url = "github:afermg/nahual";
+    nahual-flake.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
@@ -26,18 +26,14 @@
             cudaSupport = true;
           };
         };
-        nahualPkg = pkgs.python3.pkgs.callPackage ./nix/nahual.nix {
-          pynng = inputs.pynng-flake.packages.${system}.pynng;
-        };
+        nahualPkg = inputs.nahual-flake.packages.${system}.nahual;
         modelPkgs = pkgs.callPackage ./nix { };
       in
       with pkgs;
       rec {
         formatter = pkgs.alejandra;
 
-        packages = modelPkgs // {
-          nahual = nahualPkg;
-        };
+        packages = modelPkgs;
 
         apps.default =
           let
