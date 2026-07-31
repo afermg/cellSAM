@@ -206,7 +206,9 @@ def _decode_boxes(
     return numpy.stack([x1, y1, x2, y2], axis=-1).astype(numpy.float32)
 
 
-def _upscale_mask(low_res: numpy.ndarray, h: int, w: int, mask_threshold: float) -> numpy.ndarray:
+def _upscale_mask(
+    low_res: numpy.ndarray, h: int, w: int, mask_threshold: float
+) -> numpy.ndarray:
     """Resize a 256x256 mask logit map to (h, w) and threshold to bool."""
     up = cv2.resize(low_res, (w, h), interpolation=cv2.INTER_LINEAR)
     if mask_threshold == 0.5:
@@ -216,7 +218,9 @@ def _upscale_mask(low_res: numpy.ndarray, h: int, w: int, mask_threshold: float)
     return up > thr
 
 
-def _merge_into_label_map(masks: list[numpy.ndarray], h: int, w: int, min_size: int) -> numpy.ndarray:
+def _merge_into_label_map(
+    masks: list[numpy.ndarray], h: int, w: int, min_size: int
+) -> numpy.ndarray:
     """Stack boolean masks into an int32 label map (later masks overwrite earlier)."""
     out = numpy.zeros((h, w), dtype=numpy.int32)
     label = 0
@@ -233,7 +237,7 @@ def _merge_into_label_map(masks: list[numpy.ndarray], h: int, w: int, min_size: 
 # ---------------------------------------------------------------------------
 def setup(
     weights_dir: str | None = None,
-    device: int = 0,
+    device: int | str | None = None,
     providers: list[str] | None = None,
     bbox_threshold: float = 0.4,
     iou_threshold: float = 0.5,
@@ -247,9 +251,9 @@ def setup(
     weights_dir : str, optional
         Where to look for / download the ONNX weights. Defaults to
         ``~/.cache/cellsam-onnx``.
-    device : int
-        CUDA device index used in the ``device_id`` provider option when
-        CUDAExecutionProvider is available.
+    device : int | str | None
+        CUDA device index or device string. ``None`` selects CUDA when the
+        provider is available and otherwise CPU.
     providers : list[str], optional
         Explicit onnxruntime provider order. If unset we try CUDA first,
         then CPU.
@@ -262,14 +266,48 @@ def setup(
     min_size : int
         Minimum mask area in pixels (otherwise dropped).
     """
-    weights_path = Path(weights_dir).expanduser() if weights_dir else DEFAULT_WEIGHTS_DIR
+    weights_path = (
+        Path(weights_dir).expanduser() if weights_dir else DEFAULT_WEIGHTS_DIR
+    )
     weights_path = _ensure_weights(weights_path)
 
+    device_id = (
+        device
+        if isinstance(device, int)
+        else int(device.split(":", maxsplit=1)[-1])
+        if isinstance(device, str) and device.lower().startswith(("cuda", "gpu"))
+        else 0
+    )
     available = ort.get_available_providers()
     if providers is None:
         providers = []
-        if "CUDAExecutionProvider" in available:
-            providers.append(("CUDAExecutionProvider", {"device_id": int(device)}))
+        explicit_cuda = False
+        if device is None:
+            device_id = 0
+            use_cuda = "CUDAExecutionProvider" in available
+        elif isinstance(device, int):
+            device_id = device
+            use_cuda = True
+            explicit_cuda = True
+        else:
+            normalized = device.lower()
+            if normalized.startswith("cpu"):
+                device_id = 0
+                use_cuda = False
+            elif normalized.startswith(("cuda", "gpu")):
+                device_id = int(normalized.split(":", maxsplit=1)[-1])
+                use_cuda = True
+                explicit_cuda = True
+            else:
+                raise ValueError(f"Unsupported device {device!r}")
+        if use_cuda and "CUDAExecutionProvider" not in available:
+            if explicit_cuda:
+                raise RuntimeError(
+                    "CUDA was requested but ONNX Runtime has no CUDA provider"
+                )
+            use_cuda = False
+        if use_cuda:
+            providers.append(("CUDAExecutionProvider", {"device_id": int(device_id)}))
         providers.append("CPUExecutionProvider")
 
     sess_opts = ort.SessionOptions()
@@ -298,7 +336,7 @@ def setup(
 
     resolved = encoder.get_providers()
     if "CUDAExecutionProvider" in resolved:
-        device_str = f"cuda:{int(device)}"
+        device_str = f"cuda:{int(device_id)}"
     else:
         device_str = "cpu"
 

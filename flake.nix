@@ -1,5 +1,5 @@
 {
-  description = "Nahual server for CellSAM (ONNX edition; no DEEPCELL_ACCESS_TOKEN required).";
+  description = "Nahual server for CellSAM (ONNX edition; no access token required)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -10,84 +10,77 @@
     nahual-flake.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-      systems,
-      ...
-    }@inputs:
+  outputs = {
+    self,
+    nixpkgs,
+    flake-utils,
+    ...
+  } @ inputs:
     flake-utils.lib.eachDefaultSystem (
-      system:
-      let
+      system: let
         pkgs = import nixpkgs {
-          system = system;
+          inherit system;
           config = {
             allowUnfree = true;
             cudaSupport = true;
           };
         };
-        nahualPkg = inputs.nahual-flake.packages.${system}.nahual;
-
-        baseDeps = pp: [
-          nahualPkg
+        python_with_pkgs = pkgs.python3.withPackages (pp: [
+          inputs.nahual-flake.packages.${system}.nahual
           pp.onnxruntime
           pp.numpy
           pp.opencv-python
           pp.scipy
           pp.huggingface-hub
           pp.loguru
-        ];
+        ]);
+        runServer = pkgs.writeScriptBin "nahual-cellsam" ''
+          #!${pkgs.bash}/bin/bash
+          export CUDA_PATH=${pkgs.cudaPackages.cudatoolkit}
+          export LD_LIBRARY_PATH=${pkgs.cudaPackages.cudatoolkit}/lib:${pkgs.cudaPackages.cudnn}/lib:''${LD_LIBRARY_PATH:-}
+          exec ${python_with_pkgs}/bin/python ${self}/server.py \
+            "''${1:-tcp://0.0.0.0:5555}"
+        '';
+        cellsamApp = {
+          type = "app";
+          program = "${runServer}/bin/nahual-cellsam";
+        };
       in
-      with pkgs;
-      rec {
-        formatter = pkgs.alejandra;
-
-        packages = { };
-
-        apps.default =
-          let
-            python_with_pkgs = python3.withPackages baseDeps;
-            runServer = pkgs.writeScriptBin "runserver.sh" ''
-              #!${pkgs.bash}/bin/bash
+        with pkgs; rec {
+          packages = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            oci-image = import ./nix/oci-image.nix {
+              inherit pkgs;
+              name = "cellsam";
+              title = "Nahual CellSAM";
+              description = "CellSAM ONNX instance segmentation served through Nahual";
+              source = "https://github.com/afermg/cellSAM";
+              revision = self.rev or self.dirtyRev or "unknown";
+              server = runServer;
+              entrypoint = cellsamApp.program;
+            };
+          };
+          inherit python_with_pkgs;
+          formatter = pkgs.alejandra;
+          scripts.runServer = runServer;
+          apps = rec {
+            cellsam = cellsamApp;
+            default = cellsam;
+          };
+          devShells.default = mkShell {
+            packages = [
+              python_with_pkgs
+              pkgs.cudaPackages.cudatoolkit
+              pkgs.cudaPackages.cudnn
+              python3Packages.tifffile
+              python3Packages.scikit-image
+              python3Packages.pyyaml
+            ];
+            shellHook = ''
               export CUDA_PATH=${pkgs.cudaPackages.cudatoolkit}
               export LD_LIBRARY_PATH=${pkgs.cudaPackages.cudatoolkit}/lib:${pkgs.cudaPackages.cudnn}/lib:$LD_LIBRARY_PATH
-              ${python_with_pkgs}/bin/python ${self}/server.py ''${@:-"ipc:///tmp/cellsam.ipc"}
+              export PYTHONDONTWRITEBYTECODE=1
             '';
-          in
-          {
-            type = "app";
-            program = "${runServer}/bin/runserver.sh";
           };
-
-        devShells = {
-          default =
-            let
-              python_with_pkgs = python3.withPackages (
-                pp:
-                baseDeps pp
-                ++ [
-                  pp.tifffile
-                  pp.scikit-image
-                  pp.pyyaml
-                ]
-              );
-            in
-            mkShell {
-              packages = [
-                python_with_pkgs
-                pkgs.cudaPackages.cudatoolkit
-                pkgs.cudaPackages.cudnn
-              ];
-              shellHook = ''
-                export CUDA_PATH=${pkgs.cudaPackages.cudatoolkit}
-                export LD_LIBRARY_PATH=${pkgs.cudaPackages.cudatoolkit}/lib:${pkgs.cudaPackages.cudnn}/lib:$LD_LIBRARY_PATH
-                export PYTHONPATH=${python_with_pkgs}/${python_with_pkgs.sitePackages}
-                export PYTHONDONTWRITEBYTECODE=1
-              '';
-            };
-        };
-      }
+        }
     );
 }
